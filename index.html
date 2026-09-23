@@ -313,10 +313,7 @@ canvas { width: 100% !important; }
           </select>
         </div>
       </div>
-      <div class="g4">
-        <div class="field"><label>Serum creatinine</label>
-          <input type="number" id="cg-scr" value="1.0" step="0.01" min="0.01" oninput="calcCG()">
-        </div>
+      <div class="g3">
         <div class="field"><label>Actual body weight (kg)</label>
           <input type="number" id="cg-abw" value="92" step="0.5" min="0.3" oninput="calcCG()">
         </div>
@@ -332,7 +329,23 @@ canvas { width: 100% !important; }
           </select>
         </div>
       </div>
-      <div id="cg-result-area"></div>
+
+      <div class="divider" style="margin:12px 0 10px"></div>
+      <div class="card-title" style="margin-bottom:10px">Serum creatinine history</div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:10px">
+        Enter one or more SCr values with timestamps. The most recent SCr at each dose time is used (LOCF).
+        CrCl is calculated automatically using the appropriate formula for the selected population.
+      </p>
+      <div style="display:grid;grid-template-columns:1.8fr 1fr 1fr 28px;gap:8px;margin-bottom:6px">
+        <span style="font-size:11px;color:var(--muted)">Date &amp; time of SCr</span>
+        <span style="font-size:11px;color:var(--muted)">SCr value</span>
+        <span style="font-size:11px;color:var(--muted)">CrCl (auto)</span>
+        <span></span>
+      </div>
+      <div id="scr-rows"></div>
+      <button class="btn btn-sm" style="margin-top:8px" onclick="addScrRow()">+ Add SCr value</button>
+
+      <div id="cg-result-area" style="margin-top:12px"></div>
       <div class="divider"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn btn-teal" onclick="sendCGtoBayes()">Use in Bayesian estimation →</button>
@@ -347,15 +360,15 @@ canvas { width: 100% !important; }
     </div>
 
     <div class="card">
-      <div class="card-title">Reference equations</div>
-      <p style="font-size:13px;color:var(--muted);line-height:2">
-        <strong>Cockcroft-Gault (adults):</strong> CrCl = [(140 − Age) × Weight] / (72 × SCr) × 0.85 if female<br>
-        IBW<sub>male</sub> = 50 + 2.3 × (cm/2.54 − 60) &nbsp;|&nbsp; IBW<sub>female</sub> = 45.5 + 2.3 × (cm/2.54 − 60)<br>
-        AdjBW = IBW + 0.4 × (ABW − IBW) — when ABW &gt; 130% IBW<br>
-        <strong>Adult standard:</strong> Goti et al. — TVCL 4.5 L/h, CrCl<sup>0.8</sup> scaling<br>
-        <strong>ARC:</strong> CrCl &gt; 130 mL/min/1.73m² — Roberts et al. model applied<br>
-        <strong>Pediatric (≥ 2 y):</strong> Abdulla et al. allometric model<br>
-        <strong>Neonates (&lt; 2 y / PMA given):</strong> Grimsley &amp; Thomson / Allegaert model
+      <div class="card-title">CrCl estimation by population</div>
+      <p style="font-size:13px;color:var(--muted);line-height:2.1">
+        <strong>Adult / ARC (Cockcroft-Gault):</strong> CrCl = [(140 − Age) × Weight] / (72 × SCr<sub>mg/dL</sub>) × 0.85 if female<br>
+        &nbsp;&nbsp;IBW<sub>male</sub> = 50 + 2.3 × (ht_in − 60) | IBW<sub>female</sub> = 45.5 + 2.3 × (ht_in − 60) | AdjBW = IBW + 0.4 × (ABW − IBW) when ABW &gt; 130% IBW<br>
+        <strong>Pediatric 2–17y (Bedside Schwartz 2009):</strong> eGFR = (0.413 × Height<sub>cm</sub>) / SCr<sub>mg/dL</sub> &nbsp;[mL/min/1.73m²]<br>
+        <strong>Neonate term ≥37wk PMA:</strong> CrCl = (0.45 × Length<sub>cm</sub>) / SCr<sub>mg/dL</sub> &nbsp;[mL/min/1.73m²]<br>
+        <strong>Neonate preterm &lt;37wk PMA:</strong> CrCl = (0.33 × Length<sub>cm</sub>) / SCr<sub>mg/dL</sub> &nbsp;[mL/min/1.73m²]<br>
+        <strong>ARC:</strong> CrCl &gt; 130 mL/min → Roberts et al. model applied automatically<br>
+        Multiple SCr values accepted — LOCF applied per dose time.
       </p>
     </div>
   </div>
@@ -385,8 +398,10 @@ canvas { width: 100% !important; }
           <select id="b-dial"><option value="0">No</option><option value="1">Yes</option></select></div>
       </div>
       <div class="g4" style="margin-top:10px">
-        <div class="field"><label>Age (years or PMA weeks)</label>
-          <input type="number" id="b-age" value="55" min="0" step="0.1"></div>
+        <div class="field">
+          <label id="b-age-lbl">Age (years)</label>
+          <input type="number" id="b-age" value="55" min="0" step="0.1" oninput="onModelChange()">
+        </div>
         <div class="field"><label>Sex</label>
           <select id="b-sex"><option value="male">Male</option><option value="female">Female</option></select></div>
         <div class="field"><label>Population model</label>
@@ -405,6 +420,9 @@ canvas { width: 100% !important; }
       <p style="font-size:11px;color:var(--muted);margin-top:8px">
         Use Demographics tab to auto-calculate CrCl and auto-fill covariates.
       </p>
+      <div id="b-scr-badge" class="chip chip-info" style="margin-top:8px;display:inline-block">
+        No SCr history — using static CrCl above
+      </div>
     </div>
 
     <div class="card">
@@ -820,9 +838,12 @@ function selectModel(cov) {
    ═══════════════════════════════════════════════════════════════ */
 let bayesChart = null, simChart = null, advChart = null;
 let lastEstimates = null;
-let lastCGData    = null;   /* { crcl, bw, ht, age, sex, ageType, pma } */
-let importedData  = null;   /* parsed file */
-let doseCount = 0, obsCount = 0, simRegCount = 0;
+let lastCGData    = null;
+let importedData  = null;
+let doseCount = 0, obsCount = 0, simRegCount = 0, scrCount = 0;
+let scrHistory = [];   /* [{ t: ms, scr: mg/dL }] sorted ascending */
+let bScrHistory = [];  /* SCr history in Bayes tab */
+let lastAgeType = "adult", lastPma = 32, lastAge = 55, lastHt = 175, lastSex = "male", lastBw = 70;
 
 /* ═══════════════════════════════════════════════════════════════
    TAB SWITCHING
@@ -907,156 +928,222 @@ function toggleAgeFields() {
   calcCG();
 }
 
+function calcSCrMgDl(raw, unit) {
+  return unit === 'umol' ? raw / 88.42 : raw;
+}
+
+function calcCrClByPop(ageType, ageYears, pma, sex, ht, bw, scrMgDl, wtMode) {
+  /* Returns { crcl, formula, wt, wtLabel, ibw, adjbw } */
+  const htIn = ht / 2.54;
+  const ibw  = ageType === 'pma' ? bw
+             : Math.max(sex === 'male' ? 50 + 2.3*(htIn-60) : 45.5 + 2.3*(htIn-60), 0);
+  const adjbw = ibw + 0.4*(bw - ibw);
+
+  let wt = bw, wtLabel = 'ABW';
+  if (ageType === 'adult' || ageType === 'peds') {
+    if (wtMode === 'abw')       { wt = bw;    wtLabel = 'ABW'; }
+    else if (wtMode === 'ibw')  { wt = ibw;   wtLabel = 'IBW'; }
+    else if (wtMode === 'adj')  { wt = adjbw; wtLabel = 'AdjBW'; }
+    else {
+      if      (bw <= ibw)       { wt = bw;    wtLabel = 'ABW'; }
+      else if (bw <= 1.3*ibw)   { wt = bw;    wtLabel = 'ABW'; }
+      else                      { wt = adjbw; wtLabel = 'AdjBW'; }
+    }
+  }
+
+  let crcl = null, formula = '';
+  if (ageType === 'pma') {
+    /* Neonatal Schwartz: k=0.33 preterm (<37wk), k=0.45 term */
+    const k = pma < 37 ? 0.33 : 0.45;
+    crcl    = scrMgDl > 0 ? (k * ht) / scrMgDl : null;
+    formula = `(${k} × ${ht}cm) / ${scrMgDl?.toFixed(2)} = ${crcl?.toFixed(1)} mL/min/1.73m²`;
+  } else if (ageType === 'peds') {
+    /* Bedside Schwartz 2009: eGFR = 0.413 × ht / SCr */
+    crcl    = scrMgDl > 0 ? (0.413 * ht) / scrMgDl : null;
+    formula = `(0.413 × ${ht}cm) / ${scrMgDl?.toFixed(2)} = ${crcl?.toFixed(1)} mL/min/1.73m²`;
+  } else {
+    /* Cockcroft-Gault */
+    const sf = sex === 'female' ? 0.85 : 1.0;
+    crcl    = scrMgDl > 0 ? Math.max(((140 - ageYears) * wt) / (72 * scrMgDl) * sf, 0) : null;
+    formula = `[(140−${ageYears}) × ${wt.toFixed(1)}kg] / (72 × ${scrMgDl?.toFixed(2)})${sex==='female'?' × 0.85':''} = ${crcl?.toFixed(1)} mL/min`;
+  }
+  return { crcl, formula, wt, wtLabel, ibw, adjbw };
+}
+
+function addScrRow(dtStr='', scrVal=1.0) {
+  const id  = scrCount++;
+  const dt  = dtStr || defaultDT(0);
+  const div = document.createElement('div');
+  div.id = `scr-row-${id}`;
+  div.style.cssText = 'display:grid;grid-template-columns:1.8fr 1fr 1fr 28px;gap:8px;align-items:end;margin-bottom:8px';
+  div.innerHTML = `
+    <div class="field" style="gap:2px">
+      <input type="datetime-local" id="scr-dt-${id}" value="${dt}"
+             oninput="calcCG()">
+    </div>
+    <div class="field">
+      <input type="number" id="scr-val-${id}" value="${scrVal}" step="0.01" min="0.01"
+             oninput="calcCG()">
+    </div>
+    <div id="scr-crcl-${id}" style="font-size:12px;color:var(--accent);padding-bottom:6px">—</div>
+    <div style="padding-bottom:6px">
+      <button class="btn btn-sm btn-danger"
+              onclick="document.getElementById('scr-row-${id}').remove();calcCG()">✕</button>
+    </div>`;
+  document.getElementById('scr-rows').appendChild(div);
+  calcCG();
+}
+
+function getScrRows() {
+  /* Returns [{ms, scrMgDl}] sorted ascending by time */
+  const unit = document.getElementById('cg-scr-unit').value;
+  const rows = document.getElementById('scr-rows').querySelectorAll('[id^="scr-row-"]');
+  const out  = [];
+  for (const row of rows) {
+    const id  = row.id.replace('scr-row-','');
+    const dtEl= document.getElementById(`scr-dt-${id}`);
+    const vEl = document.getElementById(`scr-val-${id}`);
+    if (!dtEl || !vEl) continue;
+    const ms  = dtEl.value ? new Date(dtEl.value).getTime() : null;
+    const raw = parseFloat(vEl.value) || 0;
+    if (ms && raw > 0) out.push({ ms, scrMgDl: calcSCrMgDl(raw, unit) });
+  }
+  return out.sort((a,b) => a.ms - b.ms);
+}
+
+function getScrAtTime(scrRows, targetMs) {
+  /* LOCF: return last SCr at or before targetMs, else first available */
+  if (!scrRows.length) return null;
+  let best = scrRows[0].scrMgDl;
+  for (const s of scrRows) {
+    if (s.ms <= targetMs) best = s.scrMgDl;
+    else break;
+  }
+  return best;
+}
+
 function calcCG() {
   const ageType = document.getElementById('cg-age-type').value;
   const ageVal  = parseFloat(document.getElementById('cg-age').value) || 0;
   const sex     = document.getElementById('cg-sex').value;
   const abw     = parseFloat(document.getElementById('cg-abw').value) || 0;
   const ht      = parseFloat(document.getElementById('cg-ht').value)  || 0;
-  const scrRaw  = parseFloat(document.getElementById('cg-scr').value) || 0;
   const scrUnit = document.getElementById('cg-scr-unit').value;
   const wtMode  = document.getElementById('cg-wt-mode').value;
+  const pmaVal  = ageType === 'pma' ? ageVal : 32;
   const pnaVal  = parseFloat(document.getElementById('cg-pna').value) || 0;
+
+  /* Cache global demographics for use in Bayes */
+  lastAgeType = ageType; lastPma = pmaVal; lastAge = ageVal;
+  lastHt = ht; lastSex = sex; lastBw = abw;
+
+  const scrRows = getScrRows();
+  scrHistory = scrRows; /* global store */
+
+  /* Update individual SCr row CrCl displays */
+  const rowEls = document.getElementById('scr-rows').querySelectorAll('[id^="scr-row-"]');
+  for (const row of rowEls) {
+    const id    = row.id.replace('scr-row-','');
+    const dtEl  = document.getElementById(`scr-dt-${id}`);
+    const vEl   = document.getElementById(`scr-val-${id}`);
+    const disp  = document.getElementById(`scr-crcl-${id}`);
+    if (!dtEl || !vEl || !disp) continue;
+    const raw   = parseFloat(vEl.value) || 0;
+    const scrMg = calcSCrMgDl(raw, scrUnit);
+    if (scrMg > 0 && ht > 0) {
+      const res = calcCrClByPop(ageType, ageVal, pmaVal, sex, ht, abw, scrMg, wtMode);
+      disp.textContent = res.crcl ? res.crcl.toFixed(1) + ' mL/min' : '—';
+    } else { disp.textContent = '—'; }
+  }
 
   const resultArea   = document.getElementById('cg-result-area');
   const modelExplain = document.getElementById('model-explain');
-
-  if (!ageVal || !abw || (ageType !== 'pma' && !ht) || !scrRaw) {
-    resultArea.innerHTML = ''; return;
+  if (!ageVal || !abw || !ht || !scrRows.length) {
+    resultArea.innerHTML = '<p style="font-size:12px;color:var(--muted)">Enter demographics and at least one SCr value above.</p>';
+    return;
   }
 
-  const scr   = scrUnit === 'umol' ? scrRaw / 88.42 : scrRaw;
-  const htIn  = ht / 2.54;
-  const ibw   = ageType === 'pma' ? abw
-              : Math.max(sex === 'male' ? 50 + 2.3*(htIn-60) : 45.5 + 2.3*(htIn-60), 0);
-  const adjbw = ibw + 0.4 * (abw - ibw);
+  /* Use most recent SCr for the summary display */
+  const latestScr = scrRows[scrRows.length - 1].scrMgDl;
+  const res = calcCrClByPop(ageType, ageVal, pmaVal, sex, ht, abw, latestScr, wtMode);
+  const { crcl, formula, wt, wtLabel, ibw, adjbw } = res;
+  const bsa   = Math.sqrt((ht * abw) / 3600);
+  const isARC = crcl !== null && crcl > 130 && ageType === 'adult';
 
-  let wt, wtLabel, wtNote = '';
-  if (ageType === 'pma') {
-    wt = abw; wtLabel = 'ABW';
-  } else if (wtMode === 'abw') {
-    wt = abw; wtLabel = 'ABW';
-  } else if (wtMode === 'ibw') {
-    wt = ibw; wtLabel = 'IBW';
-  } else if (wtMode === 'adj') {
-    wt = adjbw; wtLabel = 'AdjBW';
-  } else {
-    if      (abw <= ibw)      { wt = abw;   wtLabel = 'ABW';   wtNote = 'ABW ≤ IBW — ABW used.'; }
-    else if (abw <= 1.3*ibw)  { wt = abw;   wtLabel = 'ABW';   wtNote = 'ABW within 30% of IBW — ABW used.'; }
-    else                      { wt = adjbw; wtLabel = 'AdjBW'; wtNote = 'Obese (ABW > 130% IBW) — AdjBW used.'; }
-  }
-
-  const sexFactor = (sex === 'female' && ageType !== 'pma') ? 0.85 : 1.0;
-  let crcl;
-  if (ageType === 'pma') {
-    crcl = null; /* not applicable — use BSA-corrected neonatal estimate below */
-  } else {
-    const ageYrs = ageType === 'peds' ? ageVal : ageVal;
-    crcl = Math.max(((140 - ageYrs) * wt) / (72 * scr) * sexFactor, 0);
-  }
-
-  /* BSA (Mosteller) */
-  const bsa = ht && abw ? Math.sqrt((ht * abw) / 3600) : null;
-
-  /* ARC check */
-  const bsaAdj = (crcl && bsa) ? crcl / bsa * 1.73 : null;
-  const isARC  = bsaAdj ? bsaAdj > 130 : crcl > 130;
-
-  /* CKD stage */
+  /* CKD stage (adults only) */
   let stage = '', sc = 'var(--success)';
-  if (crcl !== null) {
-    stage = crcl >= 90  ? 'Normal / ARC'
-          : crcl >= 60  ? 'Mild (G2)'
-          : crcl >= 45  ? 'Mild–moderate (G3a)'
-          : crcl >= 30  ? 'Moderate (G3b)'
-          : crcl >= 15  ? 'Severe (G4)'
-          : 'Kidney failure (G5)';
+  if (crcl !== null && ageType === 'adult') {
+    stage = crcl >= 90 ? (isARC ? 'ARC (CrCl > 130)' : 'Normal') : crcl >= 60 ? 'Mild (G2)' : crcl >= 45 ? 'Mild-mod (G3a)' : crcl >= 30 ? 'Moderate (G3b)' : crcl >= 15 ? 'Severe (G4)' : 'Failure (G5)';
     sc = crcl >= 60 ? 'var(--success)' : crcl >= 30 ? 'var(--warn)' : 'var(--danger)';
   }
 
-  lastCGData = {
-    crcl:    crcl,
-    bw:      abw,
-    ibw:     ibw,
-    adjbw:   adjbw,
-    wt:      wt,
-    wtLabel: wtLabel,
-    ht:      ht,
-    age:     ageType === 'pma' ? null : ageVal,
-    pma:     ageType === 'pma' ? ageVal : null,
-    pna:     pnaVal,
-    sex:     sex,
-    ageType: ageType,
-    bsa:     bsa,
-    bsaAdj:  bsaAdj,
-    scr:     scr,
-    isARC:   isARC
-  };
+  const formulaLabel = ageType === 'pma' ? (pmaVal < 37 ? 'Neonatal Schwartz (preterm k=0.33)' : 'Neonatal Schwartz (term k=0.45)')
+                     : ageType === 'peds' ? 'Bedside Schwartz 2009 (k=0.413)'
+                     : 'Cockcroft-Gault';
+  const crclUnit = ageType !== 'adult' ? 'mL/min/1.73m²' : 'mL/min';
 
-  /* Determine model */
-  const covForModel = {
-    ageYears: ageType === 'pma' ? 0 : ageVal,
-    ageType:  ageType,
-    crcl:     crcl || 0,
-    bw:       abw
-  };
-  const modelKey = selectModel(covForModel);
-  const model    = MODELS[modelKey];
+  lastCGData = { crcl, bw: abw, ibw, adjbw, wt, wtLabel, ht, age: ageType === 'pma' ? null : ageVal,
+                 pma: pmaVal, pna: pnaVal, sex, ageType, bsa, isARC, scrRows };
 
-  /* Render CrCl result */
-  if (crcl !== null) {
-    resultArea.innerHTML = `
-      <div class="cg-result-box">
-        <div>
-          <div class="cg-label">Estimated CrCl (Cockcroft-Gault)</div>
-          <div style="display:flex;align-items:baseline;gap:6px">
-            <span class="cg-val">${crcl.toFixed(1)}</span>
-            <span style="font-size:14px;color:var(--muted)">mL/min</span>
-          </div>
-          ${bsaAdj ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">BSA-corrected: ${bsaAdj.toFixed(1)} mL/min/1.73m²</div>` : ''}
+  resultArea.innerHTML = `
+    <div class="cg-result-box">
+      <div>
+        <div class="cg-label">CrCl — ${formulaLabel} (latest SCr ${latestScr.toFixed(2)} mg/dL)</div>
+        <div style="display:flex;align-items:baseline;gap:6px">
+          <span class="cg-val">${crcl ? crcl.toFixed(1) : '—'}</span>
+          <span style="font-size:14px;color:var(--muted)">${crclUnit}</span>
         </div>
-        <div style="display:flex;flex-direction:column;gap:5px">
-          <span style="font-size:12px;padding:3px 10px;border-radius:8px;background:${sc}22;color:${sc};font-weight:600">${stage}${isARC?' · ARC':''}</span>
-          <span style="font-size:12px;color:var(--muted)">Weight: <strong>${wt.toFixed(1)} kg</strong> (${wtLabel})</span>
-          <span style="font-size:12px;color:var(--muted)">IBW: ${ibw.toFixed(1)} kg &nbsp;|&nbsp; AdjBW: ${adjbw.toFixed(1)} kg</span>
-          ${bsa ? `<span style="font-size:12px;color:var(--muted)">BSA: ${bsa.toFixed(2)} m²</span>` : ''}
-        </div>
+        ${scrRows.length > 1 ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">${scrRows.length} SCr values stored — LOCF applied per dose</div>` : ''}
       </div>
-      ${wtNote ? `<div class="chip chip-warn" style="margin-top:8px">${wtNote}</div>` : ''}
-      <p class="cg-formula">= [(140 − ${ageVal}) × ${wt.toFixed(1)}] / (72 × ${scr.toFixed(2)})${sex==='female'?' × 0.85':''} = ${crcl.toFixed(1)} mL/min</p>`;
-  } else {
-    resultArea.innerHTML = `
-      <div class="chip chip-info" style="margin-top:10px">Neonatal patient — CrCl by Cockcroft-Gault not applicable. PK model uses PMA-based maturation function.</div>`;
-  }
+      <div style="display:flex;flex-direction:column;gap:5px">
+        ${stage ? `<span style="font-size:12px;padding:3px 10px;border-radius:8px;background:${sc}22;color:${sc};font-weight:600">${stage}</span>` : ''}
+        <span style="font-size:12px;color:var(--muted)">Weight: <strong>${wt.toFixed(1)} kg</strong> (${wtLabel})</span>
+        ${ageType === 'adult' ? `<span style="font-size:12px;color:var(--muted)">IBW: ${ibw.toFixed(1)} kg | AdjBW: ${adjbw.toFixed(1)} kg</span>` : ''}
+        <span style="font-size:12px;color:var(--muted)">BSA: ${bsa.toFixed(2)} m²</span>
+      </div>
+    </div>
+    <p class="cg-formula">${formula}</p>`;
 
-  /* Render model explanation */
-  const cls = model.class;
+  /* Model explain */
+  const covForModel = { ageYears: ageType === 'pma' ? 0 : ageVal, ageType, crcl: crcl || 0, bw: abw };
+  const modelKey    = selectModel(covForModel);
+  const model       = MODELS[modelKey];
   modelExplain.innerHTML = `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-      <span class="model-badge ${cls}">${model.name}</span>
-      <span style="font-size:12px;color:var(--muted)">Reference: ${model.ref}</span>
+      <span class="model-badge ${model.class}">${model.name}</span>
+      <span style="font-size:12px;color:var(--muted)">Ref: ${model.ref}</span>
     </div>
     <div style="font-size:13px;color:var(--muted);line-height:1.7">
-      ${modelKey==='adult'  ? `<b>Goti et al.</b> adult 2-compartment model. Population typical values: TVCL 4.5 L/h, TVVC 58.4 L, TVV2 38.4 L, Q 6.5 L/h. CL scaled by (CrCl/120)<sup>0.8</sup> and BW/70 for VC. Dialysis corrections: CL × 0.7, VC × 0.5. IIV: ω²<sub>CL</sub>=0.0025, ω²<sub>VC</sub>=0.0129, ω²<sub>V2</sub>=0.0547.`:''}
-      ${modelKey==='arc'    ? `<strong>Augmented Renal Clearance detected</strong> (CrCl > 130 mL/min). Standard models underestimate elimination in ARC. This model uses steeper CL scaling (exponent 0.95, reference CrCl 150 mL/min). Higher doses or shorter intervals are often needed.`:''}
-      ${modelKey==='peds'   ? `Allometric pediatric model. CL scaled by weight<sup>0.75</sup> (allometric exponent) and CrCl. Volume scaled linearly to weight.`:''}
-      ${modelKey==='neo'    ? `Neonatal model. CL incorporates PMA-based maturation function (PMA/40)<sup>3.4</sup> accounting for renal immaturity in premature neonates. PMA = ${ageVal} weeks, PNA = ${pnaVal} days.`:''}
+      ${modelKey==='adult' ? 'Goti et al. 2-compartment model. CL ∝ (CrCl/120)⁰·⁸ · BW/70 for VC. Dialysis: CL×0.7, VC×0.5.' : ''}
+      ${modelKey==='arc'   ? '<b>ARC detected</b> (CrCl > 130). Roberts et al. model — steeper CL scaling (exponent 0.95, ref CrCl 150).' : ''}
+      ${modelKey==='peds'  ? 'Abdulla 2008 allometric model. CL ∝ WT⁰·⁷⁵ × (CrCl/110)⁰·⁸. CrCl via Bedside Schwartz 2009.' : ''}
+      ${modelKey==='neo'   ? `Grimsley-Thomson/Allegaert neonatal model. CL ∝ maturation(PMA)³·⁴ × CrCl. PMA=${pmaVal}wk PNA=${pnaVal}d. CrCl via Neonatal Schwartz (k=${pmaVal<37?'0.33 preterm':'0.45 term'}).` : ''}
     </div>`;
 }
 
 function sendCGtoBayes() {
-  if (!lastCGData) { alert('Calculate CrCl first.'); return; }
+  if (!lastCGData) { alert('Calculate CrCl first — enter demographics and at least one SCr value.'); return; }
   const d = lastCGData;
   document.getElementById('b-bw').value   = d.bw.toFixed(1);
   document.getElementById('b-ht').value   = d.ht ? d.ht.toFixed(0) : '';
-  document.getElementById('b-crcl').value = d.crcl ? d.crcl.toFixed(1) : '5';
-  document.getElementById('b-age').value  = d.pma ? d.pma : (d.age || '');
+  /* Age: use PMA when neonate, years otherwise */
+  const ageToSet = d.ageType === 'pma' ? d.pma : d.age;
+  document.getElementById('b-age').value  = (ageToSet !== null && ageToSet !== undefined) ? ageToSet : '';
   document.getElementById('b-sex').value  = d.sex;
-  /* Set model */
+  /* Store SCr history globally for Bayes tab */
+  bScrHistory = d.scrRows || [];
+  /* Use latest CrCl for the static display field */
+  const latestCrcl = d.crcl || 5;
+  document.getElementById('b-crcl').value = latestCrcl.toFixed(1);
+  /* Update SCr history badge */
+  const badge = document.getElementById('b-scr-badge');
+  if (badge) badge.textContent = bScrHistory.length > 0
+    ? `${bScrHistory.length} SCr value(s) loaded — LOCF per dose`
+    : 'No SCr history — using static CrCl above';
   const covForModel = {
     ageYears: d.ageType === 'pma' ? 0 : (d.age || 0),
     ageType:  d.ageType,
-    crcl:     d.crcl || 0,
+    crcl:     latestCrcl,
     bw:       d.bw
   };
   const modelKey = selectModel(covForModel);
@@ -1199,14 +1286,26 @@ function getObs() {
 }
 function getCov() {
   return {
-    bw:   parseFloat(document.getElementById('b-bw').value)   || 70,
-    ht:   parseFloat(document.getElementById('b-ht').value)   || 170,
-    crcl: parseFloat(document.getElementById('b-crcl').value) || 120,
-    dial: parseFloat(document.getElementById('b-dial').value) || 0,
-    age:  parseFloat(document.getElementById('b-age').value)  || 50,
-    sex:  document.getElementById('b-sex').value,
-    pma:  parseFloat(document.getElementById('b-age').value)  || 32
+    bw:      parseFloat(document.getElementById('b-bw').value)   || 70,
+    ht:      parseFloat(document.getElementById('b-ht').value)   || 170,
+    crcl:    parseFloat(document.getElementById('b-crcl').value) || 120,
+    dial:    parseFloat(document.getElementById('b-dial').value) || 0,
+    age:     parseFloat(document.getElementById('b-age').value)  || 50,
+    sex:     document.getElementById('b-sex').value,
+    pma:     parseFloat(document.getElementById('b-age').value)  || 32,
+    ageType: document.getElementById('b-model').value === 'neo' ? 'pma'
+           : document.getElementById('b-model').value === 'peds' ? 'peds' : 'adult',
+    scrRows: bScrHistory   /* time-varying SCr history */
   };
+}
+
+/* Compute CrCl for a specific dose time using LOCF from scrRows */
+function getCrClAtTime(cov, doseMs) {
+  if (!cov.scrRows || !cov.scrRows.length) return cov.crcl;
+  const scrMgDl = getScrAtTime(cov.scrRows, doseMs);
+  if (!scrMgDl) return cov.crcl;
+  const res = calcCrClByPop(cov.ageType, cov.age, cov.pma, cov.sex, cov.ht, cov.bw, scrMgDl, 'auto');
+  return res.crcl || cov.crcl;
 }
 function getActiveModel() {
   const sel = document.getElementById('b-model').value;
@@ -1216,9 +1315,21 @@ function getActiveModel() {
   return MODELS[key];
 }
 function onModelChange() {
-  const model = getActiveModel();
-  const badge = document.getElementById('active-model-badge');
+  const model   = getActiveModel();
+  const badge   = document.getElementById('active-model-badge');
+  const ageLbl  = document.getElementById('b-age-lbl');
   badge.innerHTML = `<span class="model-badge ${model.class}">${model.name}</span>`;
+  if (ageLbl) {
+    const sel = document.getElementById('b-model').value;
+    const key = sel === 'auto' ? (() => {
+      const cov = { ageYears: parseFloat(document.getElementById('b-age').value)||55,
+                    ageType: 'adult',
+                    crcl: parseFloat(document.getElementById('b-crcl').value)||120,
+                    bw: parseFloat(document.getElementById('b-bw').value)||70 };
+      return selectModel(cov);
+    })() : sel;
+    ageLbl.textContent = key === 'pma' ? 'PMA (weeks)' : key === 'peds' ? 'Age (years, 2–17)' : 'Age (years)';
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1267,16 +1378,66 @@ function aucSS(doses, p, interval) {
 /* ═══════════════════════════════════════════════════════════════
    MAP OBJECTIVE + NELDER-MEAD
    ═══════════════════════════════════════════════════════════════ */
-function mapObj(eta, doses, obs, cov, model) {
-  const p = model.pkParams(eta, cov);
+/* Time-varying PK: build per-dose PK parameter set using LOCF SCr */
+function buildDoseParams(eta, doses, cov, model, refMs) {
+  /* Each dose gets its own CL computed from CrCl at that dose time */
+  return doses.map(d => {
+    const doseMs  = refMs ? refMs + d.t0 * 3600000 : null;
+    const crclNow = doseMs ? getCrClAtTime(cov, doseMs) : cov.crcl;
+    const covNow  = { ...cov, crcl: crclNow };
+    return { dose: d, pk: model.pkParams(eta, covNow) };
+  });
+}
+
+/* 2-compartment prediction with per-dose PK parameters */
+function conc2cptTimeVar(t, doseParams) {
+  let c = 0;
+  for (const { dose, pk } of doseParams) {
+    const { CL, VC, V2, Q } = pk;
+    if (t < dose.t0) continue;
+    const K10 = CL/VC, K12 = Q/VC, K21 = Q/V2;
+    const a1   = K10+K12+K21;
+    const disc = Math.sqrt(Math.max(a1*a1 - 4*K10*K21, 0));
+    const alpha = (a1+disc)/2;
+    const beta  = (a1-disc)/2;
+    const A = (K21-alpha)/((beta-alpha)*VC);
+    const B = (K21-beta) /((alpha-beta)*VC);
+    const dt = t - dose.t0;
+    const u  = Math.min(dt, dose.dur);
+    let ca = dose.rate*A/alpha*(1-Math.exp(-alpha*u));
+    let cb = dose.rate*B/beta *(1-Math.exp(-beta *u));
+    if (dt > dose.dur) {
+      const tail = dt - dose.dur;
+      ca = (dose.rate*A/alpha*(1-Math.exp(-alpha*dose.dur)))*Math.exp(-alpha*tail);
+      cb = (dose.rate*B/beta *(1-Math.exp(-beta *dose.dur)))*Math.exp(-beta *tail);
+    }
+    c += ca + cb;
+  }
+  return Math.max(c, 0);
+}
+
+function mapObj(eta, doses, obs, cov, model, refMs) {
+  const hasTV = cov.scrRows && cov.scrRows.length > 0;
   let prior = 0;
   for (let i=0; i<3; i++) prior += eta[i]*eta[i]/model.omega[i];
   let lik = 0;
-  for (const o of obs) {
-    const pred = conc2cpt(o.t, doses, p);
-    if (pred <= 0) { lik += 1e6; continue; }
-    const w = model.sigma_prop*pred*pred + model.sigma_add;
-    lik += Math.pow(o.dv-pred, 2)/w + Math.log(w);
+
+  if (hasTV) {
+    const doseParams = buildDoseParams(eta, doses, cov, model, refMs);
+    for (const o of obs) {
+      const pred = conc2cptTimeVar(o.t, doseParams);
+      if (pred <= 0) { lik += 1e6; continue; }
+      const w = model.sigma_prop*pred*pred + model.sigma_add;
+      lik += Math.pow(o.dv-pred, 2)/w + Math.log(w);
+    }
+  } else {
+    const p = model.pkParams(eta, cov);
+    for (const o of obs) {
+      const pred = conc2cpt(o.t, doses, p);
+      if (pred <= 0) { lik += 1e6; continue; }
+      const w = model.sigma_prop*pred*pred + model.sigma_add;
+      lik += Math.pow(o.dv-pred, 2)/w + Math.log(w);
+    }
   }
   return prior+lik;
 }
@@ -1447,8 +1608,13 @@ function runBayes() {
   const model = getActiveModel();
   setTimeout(() => {
     try {
-      const eta = nelderMead(e => mapObj(e, doses, obs, cov, model), [0,0,0]);
+      const refMs = getRefMs();
+      const eta = nelderMead(e => mapObj(e, doses, obs, cov, model, refMs), [0,0,0]);
+      /* Use average CrCl for summary PK parameters display */
       const p   = model.pkParams(eta, cov);
+      /* For plotting, use time-varying if SCr history present */
+      const hasTV = cov.scrRows && cov.scrRows.length > 0;
+      const doseParams = hasTV ? buildDoseParams(eta, doses, cov, model, refMs) : null;
       const K10 = p.CL/p.VC, K12 = p.Q/p.VC, K21 = p.Q/p.V2;
       const a1  = K10+K12+K21;
       const beta = (a1-Math.sqrt(a1*a1-4*K10*K21))/2;
@@ -1462,12 +1628,14 @@ function runBayes() {
       const tStart  = doses[0].t0;
       const tMax    = Math.max(...obs.map(o=>o.t), ...doses.map(d=>d.t0+d.dur))+24;
       const tArr    = Array.from({length:400},(_,i)=>tStart+i*(tMax-tStart)/399);
-      const predArr = tArr.map(t=>conc2cpt(t, doses, p));
+      const predArr = doseParams
+        ? tArr.map(t=>conc2cptTimeVar(t, doseParams))
+        : tArr.map(t=>conc2cpt(t, doses, p));
 
       const tbody = document.getElementById('pred-table');
       tbody.innerHTML = '';
       for (const o of obs) {
-        const pr = conc2cpt(o.t, doses, p);
+        const pr = doseParams ? conc2cptTimeVar(o.t, doseParams) : conc2cpt(o.t, doses, p);
         const residColor = Math.abs(o.dv-pr)/Math.max(o.dv,0.1)>0.2?'var(--danger)':'var(--success)';
         const tr = document.createElement('tr');
         tr.innerHTML = `<td>${o.t.toFixed(2)}</td><td>${o.dv.toFixed(2)}</td><td>${pr.toFixed(2)}</td>
@@ -1500,7 +1668,7 @@ function runBayes() {
       renderBayesAUCSummary(doses, p);
 
       document.getElementById('bayes-results').style.display = 'block';
-      setStatus(st,'success',`MAP complete · Model: ${model.name}`);
+      setStatus(st,'success',`MAP complete · Model: ${model.name}${hasTV ? ' · Time-varying CrCl (' + cov.scrRows.length + ' SCr values)' : ''}`  );
     } catch(e) {
       setStatus(st,'danger','Error: '+e.message);
     }
@@ -1902,8 +2070,11 @@ function importData() {
   const sex     = colVal(row,'sex');
   const wt      = colVal(row,'weight_kg');
   const ht      = colVal(row,'height_cm');
-  const scr     = colVal(row,'serum_creatinine');
   const scrUnit = colVal(row,'scr_unit');
+  /* Collect all SCr rows from file (all rows that have a sample_datetime OR dose_datetime + SCr) */
+  const scrColName  = getMap('serum_creatinine');
+  const scrDtColName= getMap('dose_datetime');   /* reuse dose_datetime as SCr timestamp if no dedicated col */
+  const sampDtName  = getMap('sample_datetime');
   const crcl    = colVal(row,'crcl');
   const pma     = colVal(row,'pma_weeks');
   const refDT   = colVal(row,'reference_datetime');
@@ -1924,11 +2095,34 @@ function importData() {
   }
   if (wt)      document.getElementById('cg-abw').value = wt;
   if (ht)      document.getElementById('cg-ht').value  = ht;
-  if (scr)     document.getElementById('cg-scr').value = scr;
   if (scrUnit) {
     const uMap = { 'mg/dl':'mgdl', 'mgdl':'mgdl', 'µmol/l':'umol', 'umol/l':'umol', 'umol':'umol' };
     const mapped = uMap[(scrUnit+'').toLowerCase()];
     if (mapped) document.getElementById('cg-scr-unit').value = mapped;
+  }
+
+  /* ── populate SCr history from file ── */
+  document.getElementById('scr-rows').innerHTML = '';
+  scrCount = 0;
+  const scrColN = getMap('serum_creatinine');
+  if (scrColN !== '(not in file)') {
+    /* collect unique (datetime, scr) pairs — use dose_datetime or sample_datetime as timestamp */
+    const seen = new Set();
+    parsedRows.forEach(r => {
+      const scrV = r[scrColN];
+      if (!scrV) return;
+      /* try to find a timestamp: prefer dedicated SCr datetime, then dose datetime, then sample */
+      const dtCols = [getMap('reference_datetime'), getMap('dose_datetime'), getMap('sample_datetime')];
+      let dt = null;
+      for (const col of dtCols) {
+        if (col !== '(not in file)' && r[col]) { dt = r[col]; break; }
+      }
+      const key = `${dt}||${scrV}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        addScrRow(formatForDatetimeLocal(dt || ''), parseFloat(scrV) || 1.0);
+      }
+    });
   }
   calcCG();
 
@@ -2072,6 +2266,7 @@ setRefNow();
 addDose(0, 1500, 1.5);
 addObs(7, 9.9);
 addSimRegimen(0, 21, 1000, 12, 1);
+addScrRow(document.getElementById('ref-dt').value || '', 1.0);
 calcCG();
 onModelChange();
 </script>
